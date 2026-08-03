@@ -1,0 +1,2 @@
+"""Cloud Discord MCP package."""
+
