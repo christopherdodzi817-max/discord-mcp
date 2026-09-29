@@ -3,13 +3,12 @@ from __future__ import annotations
 import discord
 
 from .config import Settings
+from .community import CommunityBot
 
 
 class DiscordService:
     def __init__(self, settings: Settings) -> None:
-        intents = discord.Intents.default()
-        intents.message_content = True
-        self.bot = discord.Client(intents=intents)
+        self.bot = CommunityBot(settings)
         self.settings = settings
 
     def require_guild(self, guild_id: int) -> discord.Guild:
@@ -26,6 +25,9 @@ class DiscordService:
         channel = self.bot.get_channel(channel_id)
         if channel is None:
             raise LookupError("Channel not found or not visible to the bot")
+        guild = getattr(channel, "guild", None)
+        if guild is None or guild.id not in self.settings.allowed_guild_ids:
+            raise PermissionError("That channel is not in an allowlisted server")
         return channel
 
     async def start(self) -> None:
