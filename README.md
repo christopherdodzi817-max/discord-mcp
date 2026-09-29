@@ -14,6 +14,8 @@ HeadMod checks non-staff text messages in allowlisted servers. Live checks post 
 | 4 | Whole terms or phrases explicitly listed in `MODERATION_TERMS_RULE_4`. | No general scam or fraud detection. |
 | 5 | No automatic signal. | Requires staff review. |
 | 6 | `discord.gg/...` invites outside a channel named `server-discovery`. | Does not recognize every invite format or decide whether other promotion is allowed. |
+| 7 | No automatic signal. | Exploit use and punishment evasion need staff review and context. |
+| 8 | No automatic signal. | HeadMod cannot adjudicate Discord or Roblox Terms of Service. |
 
 Matching normalizes Unicode, case, and whitespace, then requires whole terms or phrases. `MODERATION_SAFE_PHRASES` can exempt an exact whole-message phrase from one configured term match; built-in profanity still applies. HeadMod cannot inspect unsolicited DMs, reliably judge harassment or image/video content, detect exploits outside the server, or adjudicate Discord or Roblox Terms of Service. Report those matters to staff with context.
 
@@ -27,7 +29,7 @@ Copy `.env.example` to `.env`, set both tokens, and keep `.env` out of version c
 Copy-Item .env.example .env
 ```
 
-Set `DISCORD_BOT_TOKEN` to the bot token and `MCP_AUTH_TOKEN` to a separate long random bearer token. Set `ALLOWED_GUILD_IDS` to the server ID. Set `RULES_CHANNEL_ID` to `#rules`, `MODERATION_LOG_CHANNEL_ID` to private `#staff-room`, and `ESCALATION_ADMIN_ID` to the intended administrator's user ID. The example IDs are for the current server; replace them for a different one. A punishment request in a HeadMod ping mentions that ID only when the member currently has Administrator permission; otherwise the bot asks for a server administrator without a mention. If `ALLOWED_CHANNEL_IDS` is set, include the staff log ID and every channel the MCP tools should read or write. If left empty, MCP channel access is limited to the allowlisted guilds but not to a channel subset.
+Set `DISCORD_BOT_TOKEN` to the bot token and `MCP_AUTH_TOKEN` to a separate long random bearer token. Set `ALLOWED_GUILD_IDS` to the server ID. Set `RULES_CHANNEL_ID` to `#rules`, `MODERATION_LOG_CHANNEL_ID` to private `#staff-room`, and `ESCALATION_ADMIN_ID` to the intended administrator's user ID. The example IDs are for the current server; replace them for a different one. A HeadMod ping containing an action word such as ban, kick, timeout, mute, delete, or punish mentions that ID only when the member currently has Administrator permission; otherwise the bot asks for a server administrator without a mention. If `ALLOWED_CHANNEL_IDS` is set, include the staff log ID and every channel the MCP tools should read or write. If left empty, MCP channel access is limited to the allowlisted guilds but not to a channel subset.
 
 The example currently contains `RULES_CHANNEL_ID=1529680640872677491`, `MODERATION_LOG_CHANNEL_ID=1533923840726663421`, and `ESCALATION_ADMIN_ID=1388189183633526946`. Confirm these against the target server before starting the bot.
 
