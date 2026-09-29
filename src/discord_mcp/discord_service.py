@@ -25,6 +25,9 @@ class DiscordService:
         channel = self.bot.get_channel(channel_id)
         if channel is None:
             raise LookupError("Channel not found or not visible to the bot")
+        guild = getattr(channel, "guild", None)
+        if guild is None or guild.id not in self.settings.allowed_guild_ids:
+            raise PermissionError("That channel is not in an allowlisted server")
         return channel
 
     async def start(self) -> None:
