@@ -34,6 +34,7 @@ def setup_server(config, guild, channels=()):
     service = Mock(spec=DiscordService)
     service.settings = config
     service.bot = Mock()
+    service.bot.user = Mock(id=10)
     service.bot.get_guild.side_effect = lambda guild_id: guild if guild_id == guild.id else None
     service.bot.get_channel.side_effect = lambda channel_id: next((c for c in channels if c.id == channel_id), None)
     service.require_guild.side_effect = lambda guild_id: DiscordService.require_guild(service, guild_id)
@@ -43,6 +44,7 @@ def setup_server(config, guild, channels=()):
 
 def channel(channel_id, guild, messages):
     result = Mock(id=channel_id, guild=guild, name="general")
+    result.name = "general"
     result.send = AsyncMock()
     result.edit = AsyncMock()
     result.delete = AsyncMock()
@@ -52,7 +54,7 @@ def channel(channel_id, guild, messages):
         result.requested_limits.append(limit)
 
         async def iterate():
-            for message in messages:
+            for message in messages[:limit]:
                 yield message
 
         return iterate()
@@ -98,8 +100,8 @@ async def test_moderation_flags_requires_allowlisted_log_and_headmod_marker():
     marked.add_field(name="Author ID", value="4")
     marked.set_footer(text="HeadMod incident v1 - Staff review required")
     ordinary = discord.Embed(title="Possible rule 1 concern")
-    log = channel(99, guild, [SimpleNamespace(id=2, embeds=[ordinary], created_at=datetime.now(timezone.utc)),
-                              SimpleNamespace(id=1, embeds=[marked], created_at=datetime.now(timezone.utc))])
+    log = channel(99, guild, [SimpleNamespace(id=2, author=Mock(id=4), embeds=[ordinary], created_at=datetime.now(timezone.utc)),
+                              SimpleNamespace(id=1, author=Mock(id=10), embeds=[marked], created_at=datetime.now(timezone.utc))])
     mcp, _ = setup_server(settings(channels=frozenset({98})), guild, [log])
     with pytest.raises(ToolError, match="ALLOWED_CHANNEL_IDS"):
         await mcp._tool_manager.call_tool("list_moderation_flags", {"server_id": "1"})
@@ -108,6 +110,25 @@ async def test_moderation_flags_requires_allowlisted_log_and_headmod_marker():
     flags = await mcp._tool_manager.call_tool("list_moderation_flags", {"server_id": "1", "limit": 500})
     assert log.requested_limits == [50]
     assert len(flags) == 1 and flags[0]["message_id"] == "1"
+    assert_read_only([log], guild)
+
+
+@async_test
+async def test_flags_ignore_copied_marker_and_bound_results():
+    guild = Mock(id=1)
+    marked = discord.Embed(title="Possible rule 1 concern")
+    marked.set_footer(text="HeadMod incident v1 - Staff review required")
+    now = datetime.now(timezone.utc)
+    log = channel(99, guild, [
+        SimpleNamespace(id=1, author=Mock(id=4), embeds=[marked], created_at=now),
+        SimpleNamespace(id=2, author=Mock(id=10), embeds=[marked, marked, marked], created_at=now),
+    ])
+    mcp, _ = setup_server(settings(), guild, [log])
+    flags = await mcp._tool_manager.call_tool("list_moderation_flags", {"server_id": "1", "limit": 1})
+    assert flags == []  # The only fetched message copied the marker from another author.
+    flags = await mcp._tool_manager.call_tool("list_moderation_flags", {"server_id": "1", "limit": 2})
+    assert len(flags) == 2  # A message with several embeds cannot exceed the requested bound.
+    assert all(flag["message_id"] == "2" for flag in flags)
     assert_read_only([log], guild)
 
 
@@ -152,3 +173,48 @@ async def test_server_audit_reports_everyone_administrator_without_mutation():
     assert any("@everyone" in finding["evidence"] and finding["severity"] for finding in findings)
     assert_read_only(guild=guild)
     guild.default_role.edit.assert_not_awaited()
+
+
+@async_test
+async def test_server_audit_checks_staff_log_and_bot_role_hierarchy():
+    guild = Mock(id=1)
+    guild.default_role = Mock(id=1, name="@everyone", permissions=Mock(administrator=False, manage_roles=False))
+    guild.default_role.name = "@everyone"
+    guild.roles = [guild.default_role, Mock(id=5, name="Creator Interest", position=5,
+                                           permissions=Mock(administrator=False, manage_roles=False))]
+    guild.roles[1].name = "Creator Interest"
+    guild.me = Mock(top_role=Mock(position=3), guild_permissions=Mock(view_channel=True, read_message_history=True,
+                                                                  send_messages=True))
+    log = channel(99, guild, [])
+    log.permissions_for.side_effect = lambda subject: (
+        Mock(view_channel=True, manage_channels=False, manage_messages=False)
+        if subject is guild.default_role else
+        Mock(view_channel=False, read_message_history=False, send_messages=False, embed_links=False)
+    )
+    guild.channels = [log]
+    mcp, _ = setup_server(settings(), guild, [log])
+    findings = await mcp._tool_manager.call_tool("audit_server", {"server_id": "1"})
+    evidence = " ".join(item["evidence"] for item in findings)
+    assert "visible to @everyone" in evidence
+    assert "lacks view_channel" in evidence
+    assert "lacks read_message_history" in evidence
+    assert "lacks send_messages" in evidence
+    assert "lacks embed_links" in evidence
+    assert "Creator Interest" in evidence and "above" in evidence
+    assert_read_only([log], guild)
+
+
+@async_test
+async def test_server_audit_reports_missing_or_wrong_guild_log():
+    guild = Mock(id=1, roles=[], channels=[], me=None)
+    missing, _ = setup_server(settings(), guild)
+    findings = await missing._tool_manager.call_tool("audit_server", {"server_id": "1"})
+    assert any("unavailable" in item["evidence"] for item in findings)
+
+    other = Mock(id=2)
+    foreign_log = channel(99, other, [])
+    guild.channels = [foreign_log]
+    wrong, _ = setup_server(settings(), guild, [foreign_log])
+    findings = await wrong._tool_manager.call_tool("audit_server", {"server_id": "1"})
+    assert any("another server" in item["evidence"] for item in findings)
+    assert_read_only([foreign_log], guild)
