@@ -11,6 +11,9 @@ dependencies = [
   "python-dotenv>=1.0,<2",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8,<9"]
+
 [project.scripts]
 cloud-discord-mcp = "discord_mcp.__main__:main"
 
@@ -20,7 +23,3 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-
-[project.optional-dependencies]
-dev = ["pytest>=8,<9"]
