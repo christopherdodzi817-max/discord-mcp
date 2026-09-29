@@ -3,13 +3,12 @@ from __future__ import annotations
 import discord
 
 from .config import Settings
+from .community import CommunityBot
 
 
 class DiscordService:
     def __init__(self, settings: Settings) -> None:
-        intents = discord.Intents.default()
-        intents.message_content = True
-        self.bot = discord.Client(intents=intents)
+        self.bot = CommunityBot(settings)
         self.settings = settings
 
     def require_guild(self, guild_id: int) -> discord.Guild:
