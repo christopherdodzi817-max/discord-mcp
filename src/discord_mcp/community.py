@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Mapping
 
 import discord
 from discord import app_commands
@@ -23,6 +24,49 @@ TICKET_TYPES: tuple[tuple[str, str, str, discord.ButtonStyle], ...] = (
     ("staff", "Staff Application", "🛡️", discord.ButtonStyle.secondary),
     ("report", "Report / Appeal", "⚠️", discord.ButtonStyle.danger),
 )
+
+STAFF_ROLE_NAMES = frozenset({"Moderator", "Developer", "Admin"})
+
+
+def escape_evidence_excerpt(content: str) -> str:
+    return discord.utils.escape_mentions(discord.utils.escape_markdown(content[:300]))[:300]
+
+
+def is_staff_member(member: discord.Member) -> bool:
+    permissions = getattr(member, "guild_permissions", None)
+    if permissions is None:
+        return False
+    return bool(permissions.administrator or permissions.manage_messages) or any(
+        role.name in STAFF_ROLE_NAMES for role in member.roles
+    )
+
+
+def is_staff_role(role: discord.Role) -> bool:
+    permissions = role.permissions
+    return role.name in STAFF_ROLE_NAMES or bool(permissions.administrator or permissions.manage_messages)
+
+
+def staff_log_privacy_issues(channel: discord.TextChannel, guild: discord.Guild) -> list[str]:
+    """Return visibility risks that make a moderation log unsafe for incident evidence."""
+    issues = []
+    if channel.permissions_for(guild.default_role).view_channel:
+        issues.append("visible to @everyone")
+    roles = guild.roles
+    role_ids = {role.id for role in roles}
+    for role in roles:
+        if role.id != guild.default_role.id and not is_staff_role(role) and channel.permissions_for(role).view_channel:
+            issues.append(f"visible to nonstaff role {role.name} ({role.id})")
+    overwrites = channel.overwrites
+    if not isinstance(overwrites, Mapping):
+        issues.append("permission overwrites cannot be verified")
+    else:
+        for target, overwrite in overwrites.items():
+            bot_member = guild.me
+            if bot_member is not None and target.id == bot_member.id:
+                continue
+            if target.id not in role_ids and overwrite.view_channel is True and not is_staff_member(target):
+                issues.append(f"visible to nonstaff member {target.id}")
+    return issues
 
 
 class RoleMenuView(discord.ui.View):
@@ -147,10 +191,7 @@ class CommunityBot(discord.Client):
             await self.tree.sync(guild=guild)
 
     def is_staff(self, member: discord.Member) -> bool:
-        permissions = member.guild_permissions
-        return bool(permissions.administrator or permissions.manage_messages) or any(
-            role.name in {"Moderator", "Developer", "Admin"} for role in member.roles
-        )
+        return is_staff_member(member)
 
     def resolve_escalation_admin(self, guild: discord.Guild) -> discord.Member | None:
         member = guild.get_member(self.settings.escalation_admin_id)
@@ -167,14 +208,17 @@ class CommunityBot(discord.Client):
             return
         if self.user is not None and any(user.id == self.user.id for user in message.mentions):
             await self._answer_ping(message)
-        if self.is_staff(message.author):
+        author = message.author
+        if not hasattr(author, "guild_permissions"):
+            author = guild.get_member(author.id)
+        if author is None or not hasattr(author, "guild_permissions") or self.is_staff(author):
             return
         signals = find_term_signals(content, self.settings.terms_by_rule or {}, self.settings.safe_phrases)
         invite = find_invite_signal(content, message.channel.name)
         if invite is not None:
             signals.append(invite)
         signals.extend(self.activity_tracker.inspect(
-            message.author.id, content, len(message.mentions), message.mention_everyone, time.monotonic()
+            (guild.id, message.author.id), content, len(message.mentions), message.mention_everyone, time.monotonic()
         ))
         for signal in signals:
             await self.post_incident(message, signal)
@@ -183,7 +227,7 @@ class CommunityBot(discord.Client):
         rules = f"<#{self.settings.rules_channel_id}>"
         response = f"I can point you to the published rules in {rules} and report possible concerns for staff review."
         allowed_mentions = discord.AllowedMentions.none()
-        if re.search(r"\b(?:ban|kick|timeout|mute|delete|punish)\b", message.content, re.IGNORECASE):
+        if re.search(r"\b(?:ban|kick|timeout|mute|delete|punish|role|roles|permission|permissions|promote|demote|grant|revoke)\b", message.content, re.IGNORECASE):
             admin = self.resolve_escalation_admin(message.guild)
             if admin is not None:
                 response += f" A server administrator can decide on that request: <@{admin.id}>."
@@ -209,10 +253,11 @@ class CommunityBot(discord.Client):
         if channel is None or channel.guild.id != guild.id or not hasattr(channel, "send"):
             self.log.warning("Moderation log channel %s is unavailable in guild %s", channel_id, guild.id)
             return False
-        if channel.permissions_for(guild.default_role).view_channel:
-            self.log.warning("Moderation log channel %s is public; refusing incident", channel_id)
+        privacy_issues = staff_log_privacy_issues(channel, guild)
+        if privacy_issues:
+            self.log.warning("Moderation log channel %s is unsafe (%s); refusing incident", channel_id, "; ".join(privacy_issues))
             return False
-        excerpt = discord.utils.escape_mentions(discord.utils.escape_markdown(message.content[:300]))
+        excerpt = escape_evidence_excerpt(message.content)
         embed = discord.Embed(
             title=f"Possible rule {signal.rule_id} concern",
             description=f"**{discord.utils.escape_markdown(signal.label)}**\n{discord.utils.escape_markdown(signal.reason)}",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import math
 import re
 import unicodedata
 
@@ -77,18 +78,21 @@ class ActivityTracker:
     """Track recent message activity in a bounded per-user sliding window."""
 
     def __init__(self, window_seconds: float, message_threshold: int, repeat_threshold: int, mention_threshold: int):
-        if window_seconds <= 0 or min(message_threshold, repeat_threshold, mention_threshold) < 1:
+        if not math.isfinite(window_seconds) or window_seconds <= 0 or min(message_threshold, repeat_threshold, mention_threshold) < 1:
             raise ValueError("window and thresholds must be positive")
         self.window_seconds = window_seconds
         self.message_threshold = message_threshold
         self.repeat_threshold = repeat_threshold
         self.mention_threshold = mention_threshold
-        self._activity: dict[int, deque[tuple[float, str]]] = {}
+        self._activity: dict[int | tuple[int, int], deque[tuple[float, str]]] = {}
         self._max_events = max(message_threshold, repeat_threshold)
 
-    def inspect(self, author_id: int, text: str, mention_count: int, mention_everyone: bool, now: float) -> list[RuleSignal]:
-        events = self._activity.setdefault(author_id, deque(maxlen=self._max_events))
+    def inspect(self, author_id: int | tuple[int, int], text: str, mention_count: int, mention_everyone: bool, now: float) -> list[RuleSignal]:
         cutoff = now - self.window_seconds
+        for key, history in list(self._activity.items()):
+            if not history or history[-1][0] < cutoff:
+                del self._activity[key]
+        events = self._activity.setdefault(author_id, deque(maxlen=self._max_events))
         while events and events[0][0] < cutoff:
             events.popleft()
         normalized = normalize_text(text)

@@ -87,3 +87,18 @@ def test_safe_phrase_matching_multiple_configured_terms_suppresses_none():
         "badword and scam", {"1": ("badword",), "4": ("scam",)}, ("badword and scam",)
     )
     assert [flag.rule_id for flag in flags] == ["1", "4"]
+
+
+def test_activity_is_scoped_by_guild_and_user():
+    tracker = ActivityTracker(10, 3, 3, 8)
+    tracker.inspect((1, 7), "same", 0, False, 0)
+    tracker.inspect((1, 7), "same", 0, False, 1)
+    assert tracker.inspect((2, 7), "same", 0, False, 2) == []
+    assert tracker.inspect((1, 7), "same", 0, False, 2)
+
+
+def test_inactive_users_are_evicted():
+    tracker = ActivityTracker(10, 3, 3, 8)
+    tracker.inspect((1, 7), "hello", 0, False, 0)
+    tracker.inspect((1, 8), "hello", 0, False, 11)
+    assert (1, 7) not in tracker._activity

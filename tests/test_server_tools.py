@@ -218,3 +218,68 @@ async def test_server_audit_reports_missing_or_wrong_guild_log():
     findings = await wrong._tool_manager.call_tool("audit_server", {"server_id": "1"})
     assert any("another server" in item["evidence"] for item in findings)
     assert_read_only([foreign_log], guild)
+
+
+@async_test
+async def test_recent_audit_skips_uncached_user_and_bounds_escaped_evidence():
+    guild = Mock(id=1)
+    guild.get_member.return_value = None
+    user = discord.User(state=Mock(), data={"id": "4", "username": "reader", "discriminator": "0", "avatar": None})
+    now = datetime.now(timezone.utc)
+    uncached = SimpleNamespace(id=1, author=user, content="badword", created_at=now, mentions=[], mention_everyone=False,
+                               jump_url="https://discord.com/channels/1/10/1")
+    member = Mock(id=5, bot=False, guild_permissions=Mock(administrator=False, manage_messages=False), roles=[])
+    known = SimpleNamespace(id=2, author=member, content="@everyone **badword** " + "*" * 400,
+                            created_at=now, mentions=[], mention_everyone=False,
+                            jump_url="https://discord.com/channels/1/10/2")
+    safe = channel(10, guild, [uncached, known])
+    mcp, _ = setup_server(settings(), guild, [safe])
+    findings = await mcp._tool_manager.call_tool("audit_recent_messages", {"channel_id": "10"})
+    assert [finding["message_id"] for finding in findings] == ["2"]
+    assert len(findings[0]["evidence_excerpt"]) <= 300
+    assert "@everyone" not in findings[0]["evidence_excerpt"]
+    assert "\\*\\*" in findings[0]["evidence_excerpt"]
+
+
+@async_test
+async def test_recent_audit_resolves_uncached_author_to_nonstaff_member():
+    guild = Mock(id=1)
+    user = discord.User(state=Mock(), data={"id": "4", "username": "reader", "discriminator": "0", "avatar": None})
+    guild.get_member.return_value = Mock(id=4, guild_permissions=Mock(administrator=False, manage_messages=False), roles=[])
+    item = SimpleNamespace(id=1, author=user, content="badword", created_at=datetime.now(timezone.utc),
+                           mentions=[], mention_everyone=False, jump_url="https://discord.com/channels/1/10/1")
+    safe = channel(10, guild, [item])
+    mcp, _ = setup_server(settings(), guild, [safe])
+    findings = await mcp._tool_manager.call_tool("audit_recent_messages", {"channel_id": "10"})
+    assert len(findings) == 1 and findings[0]["rule_id"] == "1"
+    guild.get_member.assert_called_once_with(4)
+
+
+@async_test
+async def test_server_audit_skips_excluded_channels_and_log_details():
+    guild = Mock(id=1, roles=[], me=None)
+    guild.default_role = Mock(id=1, permissions=Mock(administrator=False, manage_roles=False))
+    excluded = channel(99, guild, [])
+    excluded.permissions_for.side_effect = AssertionError("excluded channel inspected")
+    guild.channels = [excluded]
+    mcp, service = setup_server(settings(channels=frozenset({10})), guild, [excluded])
+    service.bot.get_channel.side_effect = AssertionError("excluded log looked up")
+    findings = await mcp._tool_manager.call_tool("audit_server", {"server_id": "1"})
+    assert len(findings) == 1
+    assert "outside ALLOWED_CHANNEL_IDS" in findings[0]["evidence"]
+
+
+@async_test
+async def test_server_audit_reports_log_visible_to_nonstaff_role():
+    guild = Mock(id=1, me=None)
+    guild.default_role = Mock(id=1, name="@everyone", permissions=Mock(administrator=False, manage_roles=False, manage_messages=False))
+    role = Mock(id=5, name="Community", permissions=Mock(administrator=False, manage_roles=False, manage_messages=False))
+    role.name = "Community"
+    guild.roles = [guild.default_role, role]
+    log = channel(99, guild, [])
+    log.overwrites = {}
+    log.permissions_for.side_effect = lambda subject: Mock(view_channel=subject is role, manage_channels=False, manage_messages=False)
+    guild.channels = [log]
+    mcp, _ = setup_server(settings(), guild, [log])
+    findings = await mcp._tool_manager.call_tool("audit_server", {"server_id": "1"})
+    assert any("Community" in item["evidence"] and "visible" in item["evidence"] for item in findings)

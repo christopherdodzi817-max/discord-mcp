@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
@@ -36,7 +37,7 @@ def _positive_number(name: str, default: str, parser):
         value = parser(os.getenv(name, default))
     except ValueError as exc:
         raise ValueError(f"{name} must be a positive number") from exc
-    if value <= 0:
+    if value <= 0 or (isinstance(value, float) and not math.isfinite(value)):
         raise ValueError(f"{name} must be a positive number")
     return value
 

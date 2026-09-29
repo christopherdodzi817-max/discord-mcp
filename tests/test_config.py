@@ -32,3 +32,9 @@ class SettingsTests(unittest.TestCase):
         with self.env(SPAM_MESSAGE_THRESHOLD="0"):
             with self.assertRaisesRegex(ValueError, "SPAM_MESSAGE_THRESHOLD"):
                 Settings.from_env()
+
+    def test_rejects_nonfinite_spam_window(self):
+        for value in ("nan", "inf", "-inf"):
+            with self.subTest(value=value), self.env(SPAM_WINDOW_SECONDS=value):
+                with self.assertRaisesRegex(ValueError, "SPAM_WINDOW_SECONDS"):
+                    Settings.from_env()

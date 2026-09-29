@@ -7,7 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 from .config import Settings
-from .community import SELF_ASSIGNABLE_ROLES
+from .community import SELF_ASSIGNABLE_ROLES, escape_evidence_excerpt, is_staff_member, staff_log_privacy_issues
 from .discord_service import DiscordService
 from .moderation import ActivityTracker, find_invite_signal, find_term_signals
 
@@ -130,10 +130,10 @@ def create_mcp(settings: Settings, discord_service: DiscordService) -> FastMCP:
         for message in sorted(messages, key=lambda item: (item.created_at, item.id)):
             if message.author.bot or not (message.content or "").strip():
                 continue
-            permissions = message.author.guild_permissions
-            if permissions.administrator or permissions.manage_messages or any(
-                role.name in {"Moderator", "Developer", "Admin"} for role in message.author.roles
-            ):
+            author = message.author
+            if not hasattr(author, "guild_permissions"):
+                author = channel.guild.get_member(author.id)
+            if author is None or not hasattr(author, "guild_permissions") or is_staff_member(author):
                 continue
             signals = find_term_signals(message.content, settings.terms_by_rule or {}, settings.safe_phrases)
             invite = find_invite_signal(message.content, channel.name)
@@ -152,6 +152,7 @@ def create_mcp(settings: Settings, discord_service: DiscordService) -> FastMCP:
                     "rule_id": signal.rule_id,
                     "label": signal.label,
                     "reason": signal.reason,
+                    "evidence_excerpt": escape_evidence_excerpt(message.content),
                 })
         return findings
 
@@ -175,6 +176,8 @@ def create_mcp(settings: Settings, discord_service: DiscordService) -> FastMCP:
                         "evidence": f"Bot role must be above self-assignable role {role.name} ({role.id}).",
                     })
         for channel in guild.channels:
+            if settings.allowed_channel_ids and channel.id not in settings.allowed_channel_ids:
+                continue
             public = channel.permissions_for(guild.default_role)
             for permission in ("manage_channels", "manage_messages"):
                 if getattr(public, permission, False):
@@ -185,19 +188,18 @@ def create_mcp(settings: Settings, discord_service: DiscordService) -> FastMCP:
         log_id = settings.moderation_log_channel_id
         if settings.allowed_channel_ids and log_id not in settings.allowed_channel_ids:
             findings.append({"severity": "high", "evidence": f"Moderation log channel {log_id} is outside ALLOWED_CHANNEL_IDS."})
-        log_channel = discord_service.bot.get_channel(log_id)
-        if log_channel is None:
-            findings.append({"severity": "high", "evidence": f"Moderation log channel {log_id} is unavailable to the bot."})
-        elif getattr(getattr(log_channel, "guild", None), "id", None) != guild.id:
-            findings.append({"severity": "high", "evidence": f"Moderation log channel {log_id} belongs to another server."})
-        elif not hasattr(log_channel, "history") or not hasattr(log_channel, "send"):
-            findings.append({"severity": "high", "evidence": f"Moderation log channel {log_id} is unavailable for incident history or posting."})
+            log_channel = None
         else:
-            if log_channel.permissions_for(guild.default_role).view_channel:
-                findings.append({
-                    "severity": "high",
-                    "evidence": f"Moderation log channel {log_channel.name} ({log_id}) is visible to @everyone.",
-                })
+            log_channel = discord_service.bot.get_channel(log_id)
+        if log_channel is None and (not settings.allowed_channel_ids or log_id in settings.allowed_channel_ids):
+            findings.append({"severity": "high", "evidence": f"Moderation log channel {log_id} is unavailable to the bot."})
+        elif log_channel is not None and getattr(getattr(log_channel, "guild", None), "id", None) != guild.id:
+            findings.append({"severity": "high", "evidence": f"Moderation log channel {log_id} belongs to another server."})
+        elif log_channel is not None and (not hasattr(log_channel, "history") or not hasattr(log_channel, "send")):
+            findings.append({"severity": "high", "evidence": f"Moderation log channel {log_id} is unavailable for incident history or posting."})
+        elif log_channel is not None:
+            for issue in staff_log_privacy_issues(log_channel, guild):
+                findings.append({"severity": "high", "evidence": f"Moderation log channel {log_channel.name} ({log_id}) is {issue}."})
             if guild.me is not None:
                 log_permissions = log_channel.permissions_for(guild.me)
                 for permission in ("view_channel", "read_message_history", "send_messages", "embed_links"):
