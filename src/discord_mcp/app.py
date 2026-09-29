@@ -35,15 +35,16 @@ def create_app(settings: Settings) -> Starlette:
 
     @contextlib.asynccontextmanager
     async def lifespan(_: Starlette):
-        discord_task = asyncio.create_task(discord_service.start(), name="discord-gateway")
-        try:
-            # The bot connection is started in the background while MCP serves HTTP.
-            yield
-        finally:
-            await discord_service.close()
-            discord_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await discord_task
+        async with mcp.session_manager.run():
+            discord_task = asyncio.create_task(discord_service.start(), name="discord-gateway")
+            try:
+                # Both the bot and MCP session manager run for the app lifetime.
+                yield
+            finally:
+                await discord_service.close()
+                discord_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await discord_task
 
     async def health(_: Request) -> JSONResponse:
         return JSONResponse(
@@ -59,4 +60,3 @@ def create_app(settings: Settings) -> Starlette:
         lifespan=lifespan,
     )
     return BearerAuthMiddleware(app, settings.mcp_auth_token)
-
