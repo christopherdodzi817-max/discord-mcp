@@ -5,3 +5,5 @@ Implemented validated moderation settings and connected the Discord service to t
 Added `.env.example` defaults for the current rules channel, private staff log, and escalation administrator. Both channel IDs must be changed for another guild. Preserved report-only moderation behavior; the community ticket and role controls retain their existing behavior.
 
 Verification: `tests/test_config.py` and `tests/test_community.py` passed (13 tests). Full suite passed before the final narrow test change (28 tests); focused suite passed after it. No secret files were included. The only test warning is Python 3.12's `audioop` deprecation from discord.py.
+
+Reviewer correction: Discord's `AllowedMentions.to_dict()` requires member objects in the `users` list. The escalation reply now passes the verified member, and its test serializes allowed mentions to catch this runtime error. Full suite after the correction: 29 passed, one dependency deprecation warning.

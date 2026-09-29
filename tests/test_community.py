@@ -102,10 +102,11 @@ class CommunityTests(unittest.IsolatedAsyncioTestCase):
     async def test_verified_admin_is_mentioned_for_out_of_power_ping(self):
         ping = message("<@10> please ban this user")
         ping.mentions = [self.bot.user]
-        ping.guild.get_member.return_value = Mock(id=1388189183633526946, guild_permissions=Mock(administrator=True))
+        admin = Mock(id=1388189183633526946, guild_permissions=Mock(administrator=True))
+        ping.guild.get_member.return_value = admin
         await self.bot.on_message(ping)
         self.assertIn("<@1388189183633526946>", ping.reply.await_args.args[0])
-        self.assertEqual(ping.reply.await_args.kwargs["allowed_mentions"].users, [1388189183633526946])
+        self.assertEqual(ping.reply.await_args.kwargs["allowed_mentions"].to_dict()["users"], [1388189183633526946])
 
     async def test_public_reply_has_mentions_disabled_for_rules_question(self):
         ping = message("<@10> what are the rules?")

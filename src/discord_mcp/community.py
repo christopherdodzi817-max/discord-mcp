@@ -188,7 +188,7 @@ class CommunityBot(discord.Client):
             if admin is not None:
                 response += f" A server administrator can decide on that request: <@{admin.id}>."
                 allowed_mentions = discord.AllowedMentions(
-                    everyone=False, roles=False, users=[admin.id], replied_user=False
+                    everyone=False, roles=False, users=[admin], replied_user=False
                 )
             else:
                 response += " Please ask a server administrator to review that request."
