@@ -15,7 +15,7 @@ class RuleSignal:
 
 # Common profanity only. Server-specific terms belong in terms_by_rule.
 DEFAULT_TERMS: dict[str, tuple[str, ...]] = {
-    "1": ("damn", "hell", "shit", "fuck"),
+    "2": ("damn", "hell", "shit", "fuck"),
 }
 
 
@@ -36,13 +36,19 @@ def find_term_signals(
     for rule_id, terms in terms_by_rule.items():
         configured[rule_id] = (*configured.get(rule_id, ()), *terms)
 
+    safe_phrase_matches_message = normalized in normalized_safe
+    safe_phrase_signal_suppressed = False
     for rule_id, terms in configured.items():
         matched = next(
             (term for term in terms if _contains_term(normalized, normalize_text(term))),
             None,
         )
-        if matched is not None and normalized not in normalized_safe:
-            signals.append(RuleSignal(rule_id, f"Configured term: {matched}", f"Message contains configured term '{matched}'."))
+        if matched is None:
+            continue
+        if safe_phrase_matches_message and not safe_phrase_signal_suppressed:
+            safe_phrase_signal_suppressed = True
+            continue
+        signals.append(RuleSignal(rule_id, f"Configured term: {matched}", f"Message contains configured term '{matched}'."))
     return signals
 
 
@@ -90,6 +96,6 @@ class ActivityTracker:
 def find_invite_signal(text: str, channel_name: str) -> RuleSignal | None:
     if channel_name.casefold() == "server-discovery":
         return None
-    if re.search(r"(?:https?://)?(?:www\.)?discord\.gg/[A-Za-z0-9-]+", text, flags=re.IGNORECASE):
+    if re.search(r"(?<![\w.])(?:https?://)?(?:www\.)?discord\.gg/[A-Za-z0-9-]+", text, flags=re.IGNORECASE):
         return RuleSignal("6", "Off-channel Discord invite", "Discord invite posted outside server-discovery.")
     return None

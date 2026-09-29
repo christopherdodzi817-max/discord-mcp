@@ -1,5 +1,3 @@
-import pytest
-
 from discord_mcp.moderation import ActivityTracker, find_invite_signal, find_term_signals
 
 
@@ -61,3 +59,19 @@ def test_invites_outside_discovery_flag_rule_six():
 
 def test_invite_in_discovery_channel_is_not_flagged():
     assert find_invite_signal("join https://discord.gg/example", "server-discovery") is None
+
+def test_safe_phrase_suppresses_only_one_matching_rule_signal():
+    flags = find_term_signals(
+        "quoting badword for scam context",
+        {"1": ("badword",), "4": ("scam",)},
+        ("quoting badword for scam context",),
+    )
+    assert [flag.rule_id for flag in flags] == ["4"]
+
+
+def test_default_profanity_uses_rule_two():
+    assert [flag.rule_id for flag in find_term_signals("shit", {})] == ["2"]
+
+
+def test_invite_domain_embedded_in_word_is_not_flagged():
+    assert find_invite_signal("notdiscord.gg/example", "general") is None
