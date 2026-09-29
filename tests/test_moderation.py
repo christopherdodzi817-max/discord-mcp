@@ -60,13 +60,13 @@ def test_invites_outside_discovery_flag_rule_six():
 def test_invite_in_discovery_channel_is_not_flagged():
     assert find_invite_signal("join https://discord.gg/example", "server-discovery") is None
 
-def test_safe_phrase_suppresses_only_one_matching_rule_signal():
+def test_safe_phrase_with_multiple_matching_terms_suppresses_none():
     flags = find_term_signals(
         "quoting badword for scam context",
         {"1": ("badword",), "4": ("scam",)},
         ("quoting badword for scam context",),
     )
-    assert [flag.rule_id for flag in flags] == ["4"]
+    assert [flag.rule_id for flag in flags] == ["1", "4"]
 
 
 def test_default_profanity_uses_rule_two():
@@ -75,3 +75,15 @@ def test_default_profanity_uses_rule_two():
 
 def test_invite_domain_embedded_in_word_is_not_flagged():
     assert find_invite_signal("notdiscord.gg/example", "general") is None
+
+
+def test_safe_phrase_suppresses_explicit_term_not_default_profanity():
+    flags = find_term_signals("shit is badword", {"1": ("badword",)}, ("shit is badword",))
+    assert [flag.rule_id for flag in flags] == ["2"]
+
+
+def test_safe_phrase_matching_multiple_configured_terms_suppresses_none():
+    flags = find_term_signals(
+        "badword and scam", {"1": ("badword",), "4": ("scam",)}, ("badword and scam",)
+    )
+    assert [flag.rule_id for flag in flags] == ["1", "4"]

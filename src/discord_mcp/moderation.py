@@ -30,25 +30,40 @@ def find_term_signals(
     safe_phrases: tuple[str, ...] = (),
 ) -> list[RuleSignal]:
     normalized = normalize_text(text)
-    normalized_safe = {normalize_text(phrase) for phrase in safe_phrases}
-    signals: list[RuleSignal] = []
-    configured = dict(DEFAULT_TERMS)
-    for rule_id, terms in terms_by_rule.items():
-        configured[rule_id] = (*configured.get(rule_id, ()), *terms)
+    is_safe_phrase = normalized in {normalize_text(phrase) for phrase in safe_phrases}
+    matches_by_rule: dict[str, list[tuple[str, bool]]] = {}
+    explicit_matches: set[tuple[str, str]] = set()
 
-    safe_phrase_matches_message = normalized in normalized_safe
-    safe_phrase_signal_suppressed = False
-    for rule_id, terms in configured.items():
+    for rule_id, terms in DEFAULT_TERMS.items():
+        for term in terms:
+            normalized_term = normalize_text(term)
+            if _contains_term(normalized, normalized_term):
+                matches_by_rule.setdefault(rule_id, []).append((term, False))
+
+    for rule_id, terms in terms_by_rule.items():
+        for term in terms:
+            normalized_term = normalize_text(term)
+            if _contains_term(normalized, normalized_term):
+                matches_by_rule.setdefault(rule_id, []).append((term, True))
+                explicit_matches.add((rule_id, normalized_term))
+
+    # A safe phrase has no rule annotation, so only exempt it when it identifies
+    # exactly one explicit configured term. Built-in defaults remain active.
+    suppressed_match = next(iter(explicit_matches)) if is_safe_phrase and len(explicit_matches) == 1 else None
+    signals: list[RuleSignal] = []
+    for rule_id, matches in matches_by_rule.items():
         matched = next(
-            (term for term in terms if _contains_term(normalized, normalize_text(term))),
+            (
+                (term, explicit)
+                for term, explicit in matches
+                if not (explicit and suppressed_match == (rule_id, normalize_text(term)))
+            ),
             None,
         )
         if matched is None:
             continue
-        if safe_phrase_matches_message and not safe_phrase_signal_suppressed:
-            safe_phrase_signal_suppressed = True
-            continue
-        signals.append(RuleSignal(rule_id, f"Configured term: {matched}", f"Message contains configured term '{matched}'."))
+        term, _ = matched
+        signals.append(RuleSignal(rule_id, f"Configured term: {term}", f"Message contains configured term '{term}'."))
     return signals
 
 
