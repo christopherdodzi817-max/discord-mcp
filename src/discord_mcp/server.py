@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from .config import Settings
 from .discord_service import DiscordService
@@ -15,6 +16,12 @@ def create_mcp(settings: Settings, discord_service: DiscordService) -> FastMCP:
         stateless_http=True,
         json_response=True,
         streamable_http_path="/",
+        transport_security=TransportSecuritySettings(
+            allowed_hosts=[
+                "discord-mcp-ph17.onrender.com",
+                "discord-mcp-ph17.onrender.com:*",
+            ]
+        ),
     )
 
     @mcp.tool()
@@ -74,4 +81,3 @@ def create_mcp(settings: Settings, discord_service: DiscordService) -> FastMCP:
         return {"status": "sent", "message_id": str(message.id), "channel_id": channel_id}
 
     return mcp
-
