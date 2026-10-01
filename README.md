@@ -63,5 +63,10 @@ Render's Free web service can spin down after idle time and restart later, so it
 - `audit_recent_messages` returns rule candidates from up to 50 recent messages in an allowlisted channel.
 - `audit_server` reports permission concerns without changing them.
 - `send_message` sends only to an allowlisted channel and requires `confirm=true`.
+- `create_channel` and `edit_channel` create, rename, describe, move and reorder channels or categories; writes require `confirm=true`. Existing channel permissions are preserved. Creation is disabled when `ALLOWED_CHANNEL_IDS` restricts the server to a channel subset.
+- `get_roles` reads roles. `create_role` adds a label with no permissions, and `style_role` changes color, member-list grouping or position below HeadMod. Both writes require `confirm=true`; they cannot assign staff powers or change role permissions.
+
+Create a channel called `roles` or `🏷️・roles` to publish HeadMod's role directory with persistent optional-role buttons on startup. Owner, Admin, Moderator and Developer roles remain assigned by authorized staff. Emoji prefixes and decorative category headings are supported by welcome, departure, ticket and server-discovery lookups.
 
 MCP channel reads stay within `ALLOWED_GUILD_IDS` and, when configured, `ALLOWED_CHANNEL_IDS`. The bot's community commands also provide optional roles and private tickets; closing a ticket deletes that ticket channel.
+

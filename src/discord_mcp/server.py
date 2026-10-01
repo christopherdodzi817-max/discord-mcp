@@ -10,6 +10,7 @@ from .config import Settings
 from .community import SELF_ASSIGNABLE_ROLES, escape_evidence_excerpt, is_staff_member, staff_log_privacy_issues
 from .discord_service import DiscordService
 from .moderation import ActivityTracker, find_invite_signal, find_term_signals
+from .management import register_management_tools
 
 
 def create_mcp(settings: Settings, discord_service: DiscordService) -> FastMCP:
@@ -236,4 +237,6 @@ def create_mcp(settings: Settings, discord_service: DiscordService) -> FastMCP:
         )
         return {"status": "sent", "message_id": str(message.id), "channel_id": channel_id}
 
+    register_management_tools(mcp, settings, discord_service)
     return mcp
+

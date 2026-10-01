@@ -10,6 +10,7 @@ from discord import app_commands
 
 from .config import Settings
 from .moderation import ActivityTracker, RuleSignal, find_invite_signal, find_term_signals
+from .naming import channel_key
 
 
 SELF_ASSIGNABLE_ROLES: tuple[tuple[str, str, str], ...] = (
@@ -287,7 +288,7 @@ class CommunityBot(discord.Client):
             return
 
         guild = interaction.guild
-        category = discord.utils.get(guild.categories, name="TICKETS")
+        category = discord.utils.find(lambda item: channel_key(item.name) == "tickets", guild.categories)
         if category is None:
             await interaction.response.send_message("The ticket category is not ready yet.", ephemeral=True)
             return
@@ -342,7 +343,7 @@ class CommunityBot(discord.Client):
 
     async def close_ticket(self, interaction: discord.Interaction) -> None:
         channel = interaction.channel
-        if interaction.guild is None or not isinstance(channel, discord.TextChannel) or channel.category is None or channel.category.name != "TICKETS":
+        if interaction.guild is None or not isinstance(channel, discord.TextChannel) or channel.category is None or channel_key(channel.category.name) != "tickets":
             await interaction.response.send_message("This button only works inside a ticket.", ephemeral=True)
             return
         owner_id = (channel.topic or "").split(";", 1)[0].removeprefix("ticket-owner:")
@@ -352,6 +353,35 @@ class CommunityBot(discord.Client):
         await interaction.response.send_message("Closing ticket…", ephemeral=True)
         await channel.delete(reason=f"Ticket closed by {interaction.user}")
 
+    async def ensure_roles_panel(self, guild: discord.Guild) -> None:
+        channel = discord.utils.find(lambda item: channel_key(item.name) == "roles", guild.text_channels)
+        if channel is None:
+            return
+        marker = "HeadMod role directory v1"
+        embed = discord.Embed(title="🏷️ Server roles", color=discord.Color.blurple(), description=(
+            "**Team roles**\n👑 Owner — server ownership and final decisions.\n"
+            "🛡️ Admin — server administration.\n🔨 Moderator — community safety and support.\n"
+            "🛠️ Developer — game development and technical work.\n\n"
+            "Team roles are assigned by the server owner or authorized administrators.\n\n"
+            "**Community roles**\n🎨 Creator — approved content creator.\n🧪 Playtester — approved tester.\n"
+            "🎣 Community Member — regular member.\n\n"
+            "**Choose optional roles below**\n🎨 Creator Interest • 🧪 Playtester Interest • ⭐ Early Supporter\n"
+            "Tap a button to add or remove its role. Interest roles do not grant staff or approved-program access."
+        ))
+        embed.set_footer(text=marker)
+        try:
+            existing = None
+            async for message in channel.history(limit=25):
+                if message.author.id == self.user.id and any(item.footer.text == marker for item in message.embeds):
+                    existing = message
+                    break
+            if existing is not None:
+                await existing.edit(embed=embed, view=RoleMenuView(), allowed_mentions=discord.AllowedMentions.none())
+            else:
+                await channel.send(embed=embed, view=RoleMenuView(), allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            self.log.warning("Could not publish roles panel in channel %s", channel.id)
+
     async def on_ready(self) -> None:
         if self._ticket_panels_ready:
             return
@@ -359,8 +389,9 @@ class CommunityBot(discord.Client):
         for guild in self.guilds:
             if guild.id not in self.settings.allowed_guild_ids:
                 continue
+            await self.ensure_roles_panel(guild)
             panel_channel = discord.utils.find(
-                lambda channel: isinstance(channel, discord.TextChannel) and channel.name == "open-a-ticket",
+                lambda channel: isinstance(channel, discord.TextChannel) and channel_key(channel.name) == "open-a-ticket",
                 guild.text_channels,
             )
             if panel_channel is None:
@@ -392,7 +423,7 @@ class CommunityBot(discord.Client):
             except discord.Forbidden:
                 self.log.warning("Could not assign Community Member role to %s", member.id)
         welcome = discord.utils.find(
-            lambda channel: isinstance(channel, discord.TextChannel) and channel.name == "welcome",
+            lambda channel: channel_key(channel.name) == "welcome",
             member.guild.text_channels,
         )
         if welcome is None:
@@ -415,7 +446,7 @@ class CommunityBot(discord.Client):
             return
         departures = discord.utils.find(
             lambda channel: isinstance(channel, discord.TextChannel)
-            and channel.name == "member-departures",
+            and channel_key(channel.name) == "member-departures",
             member.guild.text_channels,
         )
         if departures is None:
@@ -425,3 +456,4 @@ class CommunityBot(discord.Client):
             await departures.send(f"`{name}` (`{member.id}`) left the server.")
         except discord.Forbidden:
             self.log.warning("Could not log a member departure in #%s", departures.name)
+

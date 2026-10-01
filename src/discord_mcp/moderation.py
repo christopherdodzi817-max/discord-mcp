@@ -113,8 +113,10 @@ class ActivityTracker:
 
 
 def find_invite_signal(text: str, channel_name: str) -> RuleSignal | None:
-    if channel_name.casefold() == "server-discovery":
+    from .naming import channel_key
+    if channel_key(channel_name) == "server-discovery":
         return None
     if re.search(r"(?<![\w.])(?:https?://)?(?:www\.)?discord\.gg/[A-Za-z0-9-]+", text, flags=re.IGNORECASE):
         return RuleSignal("6", "Off-channel Discord invite", "Discord invite posted outside server-discovery.")
     return None
+
