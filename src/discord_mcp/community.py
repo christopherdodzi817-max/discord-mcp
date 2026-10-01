@@ -27,6 +27,13 @@ TICKET_TYPES: tuple[tuple[str, str, str, discord.ButtonStyle], ...] = (
 )
 
 STAFF_ROLE_NAMES = frozenset({"Moderator", "Developer", "Admin"})
+TICKET_STAFF_ROLE_NAMES = frozenset({"Owner", "Admin", "Moderator"})
+
+
+def is_ticket_staff(member: discord.Member) -> bool:
+    return member.guild_permissions.administrator or any(
+        role.name in TICKET_STAFF_ROLE_NAMES for role in member.roles
+    )
 
 
 def escape_evidence_excerpt(content: str) -> str:
@@ -309,7 +316,7 @@ class CommunityBot(discord.Client):
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
         }
-        for role_name in ("Moderator", "Developer", "Admin"):
+        for role_name in TICKET_STAFF_ROLE_NAMES:
             role = discord.utils.get(guild.roles, name=role_name)
             if role is not None:
                 overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
@@ -347,7 +354,7 @@ class CommunityBot(discord.Client):
             await interaction.response.send_message("This button only works inside a ticket.", ephemeral=True)
             return
         owner_id = (channel.topic or "").split(";", 1)[0].removeprefix("ticket-owner:")
-        if str(interaction.user.id) != owner_id and not (isinstance(interaction.user, discord.Member) and self.is_staff(interaction.user)):
+        if str(interaction.user.id) != owner_id and not (isinstance(interaction.user, discord.Member) and is_ticket_staff(interaction.user)):
             await interaction.response.send_message("Only the ticket owner or staff can close this ticket.", ephemeral=True)
             return
         await interaction.response.send_message("Closing ticket…", ephemeral=True)
@@ -361,12 +368,13 @@ class CommunityBot(discord.Client):
         embed = discord.Embed(title="🏷️ Server roles", color=discord.Color.blurple(), description=(
             "**Team roles**\n👑 Owner — server ownership and final decisions.\n"
             "🛡️ Admin — server administration.\n🔨 Moderator — community safety and support.\n"
-            "🛠️ Developer — game development and technical work.\n\n"
+            "🛠️ Developer — development room and approved playtests; no access to private support reports.\n\n"
             "Team roles are assigned by the server owner or authorized administrators.\n\n"
-            "**Community roles**\n🎨 Creator — approved content creator.\n🧪 Playtester — approved tester.\n"
+            "**Community roles**\n🎨 Creator — approved creator lounge access.\n🧪 Playtester — approved playtesting room access.\n"
             "🎣 Community Member — regular member.\n\n"
             "**Choose optional roles below**\n🎨 Creator Interest • 🧪 Playtester Interest • ⭐ Early Supporter\n"
-            "Tap a button to add or remove its role. Interest roles do not grant staff or approved-program access."
+            "Tap a button to add or remove its role. Early Supporter opens the perks lounge. "
+            "Interest roles do not grant staff or approved-program access."
         ))
         embed.set_footer(text=marker)
         try:
@@ -428,10 +436,12 @@ class CommunityBot(discord.Client):
         )
         if welcome is None:
             return
+        general = discord.utils.find(lambda channel: channel_key(channel.name) == "general", member.guild.text_channels)
+        hello_channel = general.mention if general is not None else "the community chat"
         embed = discord.Embed(
             title="A new angler just joined! 🎣",
             description=(
-                f"Welcome {member.mention}! Say hello in **#introductions**, then use **/roles** "
+                f"Welcome {member.mention}! Say hello in {hello_channel}, then use **/roles** "
                 "to choose the community spaces you want to see."
             ),
             color=discord.Color.teal(),
