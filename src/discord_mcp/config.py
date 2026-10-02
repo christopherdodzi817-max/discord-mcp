@@ -64,6 +64,8 @@ class Settings:
     spam_window_seconds: float = 10
     spam_message_threshold: int = 5
     mention_threshold: int = 8
+    repeated_mention_limit: int = 3
+    repeated_mention_window_seconds: float = 3600
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -93,5 +95,7 @@ class Settings:
             spam_window_seconds=_positive_number("SPAM_WINDOW_SECONDS", "10", float),
             spam_message_threshold=_positive_number("SPAM_MESSAGE_THRESHOLD", "5", int),
             mention_threshold=_positive_number("MENTION_THRESHOLD", "8", int),
+            repeated_mention_limit=_positive_number("REPEATED_MENTION_LIMIT", "3", int),
+            repeated_mention_window_seconds=_positive_number("REPEATED_MENTION_WINDOW_SECONDS", "3600", float),
         )
 

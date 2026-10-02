@@ -112,6 +112,54 @@ class ActivityTracker:
         return [RuleSignal("3", "Spam or mention flood", "; ".join(reasons) + ".")]
 
 
+class MentionTracker:
+    """Count unique direct-ping messages across channels within a rolling window."""
+
+    def __init__(self, limit: int = 3, window_seconds: float = 3600):
+        if limit < 1 or not math.isfinite(window_seconds) or window_seconds <= 0:
+            raise ValueError("mention limit and window must be positive")
+        self.limit = limit
+        self.window_seconds = window_seconds
+        self._events: dict[tuple[int, int, int], dict[int, float]] = {}
+        self._warned: dict[tuple[int, int], float] = {}
+        self._seen: dict[tuple[int, int], float] = {}
+
+    def record(self, guild_id: int, author_id: int, message_id: int,
+               target_ids: list[int], timestamp: float, now: float, *,
+               historical: bool = False) -> list[int]:
+        cutoff = now - self.window_seconds
+        for key, events in list(self._events.items()):
+            current = {mid: at for mid, at in events.items() if at > cutoff}
+            if current:
+                self._events[key] = current
+            else:
+                del self._events[key]
+        self._warned = {key: at for key, at in self._warned.items() if at > cutoff}
+        self._seen = {key: at for key, at in self._seen.items() if at > cutoff}
+        targets = sorted(set(target_ids) - {author_id})
+        seen_key = (guild_id, message_id)
+        if timestamp <= cutoff or not targets or seen_key in self._seen:
+            return []
+        self._seen[seen_key] = timestamp
+        triggered = []
+        for target_id in targets:
+            key = (guild_id, author_id, target_id)
+            events = self._events.setdefault(key, {})
+            if message_id in events:
+                continue
+            events[message_id] = timestamp
+            self._events[key] = dict(sorted(events.items(), key=lambda item: (item[1], item[0]))[-(self.limit + 1):])
+            if len(self._events[key]) > self.limit:
+                triggered.append(target_id)
+        if historical or (guild_id, author_id) in self._warned:
+            return []
+        return triggered
+
+    def mark_warned(self, guild_id: int, author_id: int, timestamp: float) -> None:
+        key = (guild_id, author_id)
+        self._warned[key] = max(timestamp, self._warned.get(key, timestamp))
+
+
 def find_invite_signal(text: str, channel_name: str) -> RuleSignal | None:
     from .naming import channel_key
     if channel_key(channel_name) == "server-discovery":

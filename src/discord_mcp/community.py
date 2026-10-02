@@ -3,13 +3,15 @@ from __future__ import annotations
 import logging
 import re
 import time
+import asyncio
+from datetime import datetime, timezone
 from collections.abc import Mapping
 
 import discord
 from discord import app_commands
 
 from .config import Settings
-from .moderation import ActivityTracker, RuleSignal, find_invite_signal, find_term_signals
+from .moderation import ActivityTracker, MentionTracker, RuleSignal, find_invite_signal, find_term_signals
 from .naming import channel_key
 
 
@@ -171,6 +173,10 @@ class CommunityBot(discord.Client):
         self.activity_tracker = ActivityTracker(
             settings.spam_window_seconds, settings.spam_message_threshold, 3, settings.mention_threshold
         )
+        self.mention_tracker = MentionTracker(settings.repeated_mention_limit, settings.repeated_mention_window_seconds)
+        self._mention_lock = asyncio.Lock()
+        self._mention_history_ready = asyncio.Event()
+        self._mention_history_complete = False
 
         @self.tree.command(name="roles", description="Choose optional community roles and perks.")
         async def roles(interaction: discord.Interaction) -> None:
@@ -214,6 +220,7 @@ class CommunityBot(discord.Client):
         content = message.content or ""
         if not content.strip():
             return
+        await self._check_repeated_mentions(message)
         if self.user is not None and any(user.id == self.user.id for user in message.mentions):
             await self._answer_ping(message)
         author = message.author
@@ -230,6 +237,99 @@ class CommunityBot(discord.Client):
         ))
         for signal in signals:
             await self.post_incident(message, signal)
+
+    async def _check_repeated_mentions(self, message: discord.Message) -> None:
+        targets = [user.id for user in message.mentions if not user.bot and user.id != message.author.id]
+        if not targets:
+            return
+        await self._mention_history_ready.wait()
+        async with self._mention_lock:
+            now = time.time()
+            triggered = self.mention_tracker.record(
+                message.guild.id, message.author.id, message.id, targets,
+                message.created_at.timestamp(), now,
+            )
+            if not triggered:
+                return
+            response = (
+                f"<@{message.author.id}> **Warning:** you have tagged the same member more than "
+                f"{self.settings.repeated_mention_limit} times in the past "
+                f"{self.settings.repeated_mention_window_seconds / 60:g} minutes. "
+                "Please avoid repeated pings and use a ticket if you need help."
+            )
+            sent = False
+            try:
+                await message.reply(
+                    response, mention_author=False,
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, roles=False, users=[message.author], replied_user=False,
+                    ),
+                )
+                sent = True
+            except discord.HTTPException:
+                self.log.warning("Could not send repeated-ping warning in channel %s", message.channel.id)
+            reason = (
+                f"More than {self.settings.repeated_mention_limit} direct-ping messages within "
+                f"{self.settings.repeated_mention_window_seconds:g} seconds; target IDs: "
+                + ", ".join(str(target) for target in triggered) + ". "
+                + ("Warning sent to the sender." if sent else "Could not send a public warning; staff review needed.")
+            )
+            logged = await self.post_incident(message, RuleSignal("3", "Repeated member pings", reason))
+            if sent or logged:
+                self.mention_tracker.mark_warned(message.guild.id, message.author.id, now)
+
+    async def _restore_mention_history(self) -> None:
+        """Recover the rolling window without replaying warnings for old messages."""
+        self._mention_history_ready.clear()
+        async with self._mention_lock:
+            now = time.time()
+            before = datetime.fromtimestamp(now, timezone.utc)
+            after = datetime.fromtimestamp(now - self.settings.repeated_mention_window_seconds, timezone.utc)
+            complete = True
+            try:
+                for guild in self.guilds:
+                    if guild.id not in self.settings.allowed_guild_ids:
+                        continue
+                    channels = {channel.id: channel for channel in [*guild.text_channels, *guild.threads]}
+                    for channel in channels.values():
+                        try:
+                            count = 0
+                            async for message in channel.history(limit=1000, after=after, before=before):
+                                count += 1
+                                if message.author.bot:
+                                    if self.user is not None and message.author.id == self.user.id:
+                                        public_warning = re.match(
+                                            r'^<@(\d+)> \*\*Warning:\*\* you have tagged the same member more than ',
+                                            message.content or '',
+                                        )
+                                        if public_warning:
+                                            self.mention_tracker.mark_warned(
+                                                guild.id, int(public_warning.group(1)), message.created_at.timestamp(),
+                                            )
+                                    if (channel.id == self.settings.moderation_log_channel_id
+                                            and self.user is not None and message.author.id == self.user.id
+                                            and not staff_log_privacy_issues(channel, guild)):
+                                        for embed in message.embeds:
+                                            if ((embed.description or '').startswith('**Repeated member pings**')
+                                                    and embed.footer.text == 'HeadMod incident v1 - Staff review required'):
+                                                for field in embed.fields:
+                                                    if field.name == 'Author ID' and field.value.isdecimal():
+                                                        self.mention_tracker.mark_warned(guild.id, int(field.value), message.created_at.timestamp())
+                                    continue
+                                targets = [user.id for user in message.mentions if not user.bot]
+                                self.mention_tracker.record(
+                                    guild.id, message.author.id, message.id, targets,
+                                    message.created_at.timestamp(), now, historical=True,
+                                )
+                            if count >= 1000:
+                                complete = False
+                                self.log.warning("Repeated-ping history exceeded recovery limit in channel %s", channel.id)
+                        except discord.HTTPException:
+                            complete = False
+                            self.log.warning("Could not recover repeated-ping history in channel %s", channel.id)
+                self._mention_history_complete = complete
+            finally:
+                self._mention_history_ready.set()
 
     async def _answer_ping(self, message: discord.Message) -> None:
         rules = f"<#{self.settings.rules_channel_id}>"
@@ -391,6 +491,7 @@ class CommunityBot(discord.Client):
             self.log.warning("Could not publish roles panel in channel %s", channel.id)
 
     async def on_ready(self) -> None:
+        await self._restore_mention_history()
         if self._ticket_panels_ready:
             return
         self._ticket_panels_ready = True

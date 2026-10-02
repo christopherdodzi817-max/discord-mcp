@@ -1,5 +1,13 @@
 # Cloud Discord MCP and HeadMod
 
+## Passive repeated-ping warnings
+
+HeadMod warns a sender on their fourth message directly tagging the same human member within a rolling hour, across channels and active threads. This includes human staff. Self-mentions and bots are excluded. A warning mentions only its sender and is logged privately through the existing moderation log checks. Each sender receives at most one warning per hour; this rule does not delete messages or change member permissions.
+
+`REPEATED_MENTION_LIMIT` defaults to `3` and `REPEATED_MENTION_WINDOW_SECONDS` defaults to `3600`. Native Discord AutoMod separately controls the maximum mentions permitted in a single message.
+
+On READY, HeadMod recovers the preceding hour from accessible text channels and active threads, at most 1000 messages per channel, and restores warning cooldowns from its own public warnings and private incident log. Recovery does not issue warnings for historical messages. Archived threads not present in the active thread cache are not recovered; their messages are still counted when received live. Failed or truncated history recovery is logged and reflected in `/health` as `mention_protection.history_complete=false`; live counting remains available. Keep a single deployed gateway process.
+
 A Discord bot with a bearer-authenticated Model Context Protocol (MCP) endpoint at `/mcp`. HeadMod reports possible rule concerns to a private staff channel for human review. It does not ban, timeout, kick, or delete messages as a moderation response.
 
 ## What HeadMod checks
@@ -31,7 +39,7 @@ Copy-Item .env.example .env
 
 Set `DISCORD_BOT_TOKEN` to the bot token and `MCP_AUTH_TOKEN` to a separate long random bearer token. Set `ALLOWED_GUILD_IDS` to the server ID. Set `RULES_CHANNEL_ID` to `#rules`, `MODERATION_LOG_CHANNEL_ID` to private `#staff-room`, and `ESCALATION_ADMIN_ID` to the intended administrator's user ID. The example IDs are for the current server; replace them for a different one. A HeadMod ping containing an action word such as ban, kick, timeout, mute, delete, or punish mentions that ID only when the member currently has Administrator permission; otherwise the bot asks for a server administrator without a mention. If `ALLOWED_CHANNEL_IDS` is set, include the staff log ID and every channel the MCP tools should read or write. If left empty, MCP channel access is limited to the allowlisted guilds but not to a channel subset.
 
-The example currently contains `RULES_CHANNEL_ID=1529680640872677491`, `MODERATION_LOG_CHANNEL_ID=1533923840726663421`, and `ESCALATION_ADMIN_ID=1388189183633526946`. Confirm these against the target server before starting the bot.
+Set the rules channel, private moderation-log channel, and escalation administrator IDs privately for the target server before starting the bot.
 
 Term lists are comma-separated literal terms or phrases. Add only terms staff have reviewed; leave a rule's list blank if it has no agreed terms. `SPAM_WINDOW_SECONDS`, `SPAM_MESSAGE_THRESHOLD`, and `MENTION_THRESHOLD` set the rule 3 thresholds; the identical-message threshold is currently fixed at three.
 

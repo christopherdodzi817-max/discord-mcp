@@ -52,6 +52,13 @@ def create_app(settings: Settings) -> Starlette:
                 "status": "ok",
                 "discord_ready": discord_service.bot.is_ready(),
                 "guild_count": len(discord_service.bot.guilds),
+                "mention_protection": {
+                    "enabled": True,
+                    "limit": settings.repeated_mention_limit,
+                    "window_seconds": settings.repeated_mention_window_seconds,
+                    "ready": discord_service.bot._mention_history_ready.is_set(),
+                    "history_complete": discord_service.bot._mention_history_complete,
+                },
             }
         )
 
